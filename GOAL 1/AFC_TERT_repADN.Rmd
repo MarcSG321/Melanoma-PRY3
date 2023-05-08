@@ -1,0 +1,279 @@
+---
+title: "AFC_KIT_repADN"
+author: "Alba Maeso Olmos"
+date: '2023-03-23'
+output: html_document
+---
+
+```{r}
+library(knitr)
+knitr::opts_chunk$set(echo = FALSE)
+library(FactoMineR)
+library(factoextra)
+library(corrplot)
+library(tidyverse)
+library(dplyr)
+library(mice)
+library(visdat)
+```
+
+
+# Tratamiento de datos
+
+```{r}
+data2 = read.csv("TERT.csv", as.is = TRUE)
+
+```
+
+
+```{r}
+library (dplyr)
+
+names(data2)[10] = 'longitud_telomeros'
+names(data2)[4] = 'lentigos_en_area_de_MM'
+names(data2)[5] = 'localizacion'
+names(data2)[6] = 'fotolocalizacion'
+
+summary(data2)
+
+```
+
+```{r}
+#datos faltantes por variable
+numNA = apply(data2, 2, function(x) sum(is.na(x))) # 2 = col
+percNA = round(100*apply(data2,2, function(x) mean(is.na(x))), 2)
+tablaNA = data.frame("Variable" = colnames(data2), numNA, percNA)
+summary(tablaNA)
+
+#datos faltantes por individuo
+numNA1 = apply(data2, 1, function(x) sum(is.na(x)))
+percNA1 = round(100*apply(data2, 1, function(x) mean(is.na(x))), 2)
+tablaNA1 = data.frame(numNA1, percNA1)
+summary(tablaNA1)
+```
+
+```{r}
+data2 <- mutate_all(data2, ~replace(., is.na(.), 'desc'))
+summary(data2)
+```
+
+Antes de comenzar, hemos convertido todas las variables a factor excepto las númericas de las que vamos a crear rangos de valores.
+
+```{r}
+nofactor <- c("Edad", "longitud_telomeros")
+
+
+misfact <- setdiff(colnames(data2),nofactor)
+for (v in misfact){
+  data2[,v]=factor(data2[,v])
+}
+```
+
+
+```{r}
+summary(data2)
+
+```
+## Categorizar edad
+
+```{r Distribución Edad}
+barplot((table(data2$Edad)),xlab='Edad',col = "mistyrose", cex.names = 0.7)
+
+summary(data2$Edad)
+
+```
+
+```{r Crear rangos para las variable Edad y nueva distribución}
+
+# Pasamos a númericas las variables que son num pero están como carácter para poder
+# crear los rangos y categorizarlas
+
+data2$Edad = as.integer(data2$Edad)
+
+edad_categ <- cut(data2$Edad, breaks = c(0, 30, 65, 99),
+    labels = c("0-30", "31-65", "66-99"),
+    include.lowest = TRUE)
+
+edad_categ = as.factor(edad_categ)
+class(edad_categ)
+
+data2$edad_categ = edad_categ
+
+barplot((table(data2$edad_categ)),xlab='Age Categories', ylab='Count', cex.names=0.7, col='#F8766D', ylim=c(0,80), border=NA)
+
+```
+## Categorizar longitud telómeros
+
+```{r Categorizar longitud_telomeros}
+
+data2$longitud_telomeros[data2$longitud_telomeros == "desc"] <- 9999
+
+data2$longitud_telomeros = as.numeric(data2$longitud_telomeros)
+
+
+long_telomeros_categ <- cut(data2$longitud_telomeros, breaks = c(0, 1.17, 5, Inf),
+    labels = c("0 - 1.17", "1.17 - 5", "desc"),
+    include.lowest = TRUE)
+
+data2$long_telomeros_categ = as.factor(long_telomeros_categ)
+class(long_telomeros_categ)
+
+
+barplot((table(data2$long_telomeros_categ)),xlab="Telomeres' length",ylab='Count', cex.names = 0.7, col='#00BFC4', ylim=c(0,70), border=NA)
+
+```
+
+# AFC
+
+```{r}
+data2 =  data2[,-c(2,10)]
+res.mca <- MCA(data2, graph = FALSE, ncp=7)
+eig.val <- get_eigenvalue(res.mca) 
+Vmedia = 100 * (1/nrow(eig.val))
+fviz_eig(res.mca, addlabels = TRUE, ncp=7) +
+  geom_hline(yintercept=Vmedia, linetype=2)
+kable(head(eig.val))
+```
+
+```{r}
+
+var_expl = res.mca$var$contrib
+head(var_expl,n=40)
+```
+
+```{r}
+fviz_mca_ind(res.mca, axes = c(3,4),
+             label = "none", # ocultar etiquetas de los individuos
+             habillage = "NBN_rs1805794", # variable utilizada para colorear 
+             palette = c("darkolivegreen3", "darkgoldenrod1", '#424b80', 'red'),
+             addEllipses = TRUE, # elipse alrededor de cada grupo coloreado
+             ellipse.type = "confidence", # elipse de confianza alrededor del punto medio
+             ggtheme = theme_minimal()) 
+```
+
+```{r}
+fviz_mca_ind(res.mca, axes = c(2,3),
+             label = "none", # ocultar etiquetas de los individuos
+             habillage = "NBN_rs709816", # variable utilizada para colorear 
+             palette = c("darkolivegreen3", "darkgoldenrod1", '#424b80', 'white'),
+             addEllipses = TRUE, # elipse alrededor de cada grupo coloreado
+             ellipse.type = "confidence", # elipse de confianza alrededor del punto medio
+             ggtheme = theme_minimal()) 
+```
+
+```{r}
+
+fviz_mca_ind(res.mca, axes = c(3,4),
+             repel = TRUE,
+             label='none',
+             habillage = "TERTprom", # variable utilizada para colorear
+             palette = c("#00AFBB", "#E7B800"), # colores para cada grupo
+            addEllipses = TRUE, # elipse alrededor de cada grupo coloreado
+             ellipse.type = "confidence", # elipse de confianza alrededor del   
+            map =  "symmetric",
+            ggtheme = theme_minimal())
+
+fviz_mca_ind(res.mca, axes = c(3,4),
+             repel = TRUE, # ocultar etiquetas de los individuos
+              label='none',
+             habillage = "rs2284063_PLA2G6", # variable utilizada para colorear
+            addEllipses = TRUE, # elipse alrededor de cada grupo coloreado
+             ellipse.type = "confidence", # elipse de confianza alrededor del punto medio
+            map =  "symmetric",
+             ggtheme = theme_minimal())
+
+ 
+ fviz_mca_ind(res.mca, axes = c(3,4),
+             repel = TRUE, # ocultar etiquetas de los individuos
+              label='none',
+             habillage = "XRCC1_rs3213245", # variable utilizada para colorear
+            addEllipses = TRUE, # elipse alrededor de cada grupo coloreado
+             ellipse.type = "confidence", # elipse de confianza alrededor del punto medio
+            map =  "symmetric",
+             ggtheme = theme_minimal())
+
+fviz_mca_ind(res.mca, axes = c(3,4),
+             repel = TRUE,
+              label='none',
+             habillage = "rs7023329_MTAP", # variable utilizada para colorear
+            addEllipses = TRUE, # elipse alrededor de cada grupo coloreado
+             ellipse.type = "confidence", # elipse de confianza alrededor del  
+            map =  "symmetric",
+             ggtheme = theme_minimal())
+
+fviz_mca_ind(res.mca, axes = c(3,4),
+             repel = TRUE,
+              label='none',
+             habillage = "rs10757257_MTAP", # variable utilizada para colorear
+            addEllipses = TRUE, # elipse alrededor de cada grupo coloreado
+             ellipse.type = "confidence", # elipse de confianza alrededor del  
+            map =  "symmetric",
+             ggtheme = theme_minimal())
+
+
+
+```
+
+
+
+
+
+```{r}
+
+fviz_contrib(res.mca, choice = "var", axes = 1, top = 20)
+fviz_contrib(res.mca, choice = "var", axes = 2, top = 30)
+fviz_contrib(res.mca, choice = "var", axes = 3, top = 30)
+fviz_contrib(res.mca, choice = "var", axes = 4, top = 30)
+fviz_contrib(res.mca, choice = "var", axes = 5, top = 30)
+fviz_contrib(res.mca, choice = "var", axes = 6, top = 30)
+fviz_contrib(res.mca, choice = "var", axes = 7, top = 30)
+
+```
+
+
+```{r}
+
+fviz_mca_var(res.mca, select.var= list(contrib = 10), axes=c(1,2), repel=TRUE, xlim=c(-1,11), ylim=c(-2.5, 11))
+fviz_mca_var(res.mca, select.var= list(contrib = 7), axes=c(2,7), repel=TRUE)
+fviz_mca_var(res.mca, select.var= list(contrib = 15), axes=c(2,3), repel=TRUE, xlim=c(-1,11), ylim=c(-2.5, 11))
+
+```
+
+## Anómalos
+
+Deberían haber como mucho 6 faltantes y hay 23.
+
+```{r }
+eig.val <- get_eigenvalue(res.mca) # info de la PCA
+K = 7
+misScores = res.mca$ind$coord[,1:K]  # sacamos las t
+miT2 = colSums(t(misScores**2) / eig.val[1:K,1])
+
+I = nrow(data2)
+F95 = K*(I**2 - 1)/(I*(I - K)) * qf(0.95, K, I-K)
+F99 = K*(I**2 - 1)/(I*(I - K)) * qf(0.99, K, I-K)
+
+plot(1:length(miT2), miT2, type = "l", xlab = "Pacientes", ylab = "T2")
+
+abline(h = F95, col = "orange", lty = 2, lwd = 2)
+abline(h = F99, col = "red3", lty = 2, lwd = 2)
+
+anomalas = which(miT2 > F99)
+anomalas
+
+```
+
+
+```{r }
+
+d = data2[anomalas,]
+summary(d)
+
+```
+ 
+
+
+
+
+
+
