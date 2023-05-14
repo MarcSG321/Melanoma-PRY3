@@ -1,0 +1,417 @@
+---
+title: "Objetivo2"
+author: "Eva Cantín Larumbe"
+date: "2023-04-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+```
+
+
+Abrimos los datos y los limpiamos rápidamente:
+```{r data}
+df = read.csv("rep_adn_missing20_grupfuz.csv")
+df = df[, -c(1,2)]         #eliminamos 2 columnas que son índices
+
+#eliminamos las siguientes columnas:
+df = df[, !names(df) %in% c("Grupo_etiopatogenico","grupfuz","grupfuz3","grupfuz4")]
+
+#guardamos las variables de los genes de reparación
+genes = colnames(df[,23:42])
+
+#nos quedamos con los datos de genes de reparación
+df2 = df[, c(genes, "grupfuz_todo")]
+```
+
+Estudiamos los NAs por cada gen de reparación y por cada paciente:
+```{r}
+#datos faltantes por variable
+numNA = apply(df2, 2, function(x) sum(is.na(x)))
+percNA = round(100*apply(df2,2, function(x) mean(is.na(x))), 2)
+tablaNA = data.frame("Variable" = colnames(df2), numNA, percNA)
+tablaNA
+
+#datos faltantes por individuo
+numNA2 = apply(df, 1, function(x) sum(is.na(x)))
+percNA2 = round(100*apply(df2, 1, function(x) mean(is.na(x))), 2)
+tablaNA2 = data.frame("Variable" = colnames(df2), numNA, percNA)
+tablaNA2
+```
+
+
+Separamos la BD en X (variables explicativas, genes de reparación del ADN) y en Y (variable explicada: grupo_etiop)
+```{r train y test}
+#make this example reproducible
+library(caret)
+set.seed(100)
+
+#separamos en train (75%) y test (25%)
+trainFilas = createDataPartition(df2$grupfuz_todo, p=0.75, list=FALSE)
+
+train = df2[trainFilas,]    
+test = df2[-trainFilas,] 
+
+#convertimos los grupos etiopatogénicos en factor
+y_train = as.factor(train$grupfuz_todo)
+y_test =  as.factor(test$grupfuz_todo)
+
+X_train = train[, !names(train) %in% c("grupfuz_todo")]
+X_test = test[, !names(test) %in% c("grupfuz_todo")]
+```
+
+
+# PLS-DA
+El primer método que vamos a probar es PLS-DA. Escalamos y centramos los datos con scaleC="standard".
+
+```{r}
+#hacemos un PLSDA, ponemos 4 componentes
+library(ropls)
+myplsda = opls(x = X_train, y = y_train, predI = 4)
+```
+
+
+Para validar el modelo PLS, puede ser útil observar el valor de R^2^ y Q^2^ A la vista de los resultados del modelo, la bondad de predicción de nuestro modelo PLS con A=`r nrow(myplsda@modelDF)` componentes no es muy bueno, pues no supera el valor 0.5 (`r myplsda@modelDF[nrow(myplsda@modelDF),6]`).
+
+En cuanto a la bondad de ajuste, entre las `r nrow(myplsda@modelDF)` componentes obtenemos un R^2^ acumulado de `r myplsda@modelDF[nrow(myplsda@modelDF), 2]` para las X y de `r myplsda@modelDF[nrow(myplsda@modelDF), 4]` para las Y. Además, si observamos el gráfico de similaridad, concluimos que, por azar, el modelo sería menos bueno que el que ya tenemos. Si no fuese así, deberíamos replantearnos la elección de otro tipo de técnica.
+
+No obstante, a pesar de que la función opls() nos aconseja utilizar `r nrow(myplsda@modelDF)` componentes, vamos a visualizar R^2^ y Q^2^ por si fuera conveniente escoger una componente más. Hay veces donde la Q^2^ empieza a disminuir, pero la caída es muy pequeña y se sigue pareciendo a la R2.
+
+Recordemos que R selecciona componentes hasta donde Q^2^ empieza a disminuir. Esto se realiza para que no haya **sobreajuste** porque si aumentamos innecesariamente el número de componentes, la capacidad predictiva (Q^2^) disminuye estrepitosamente, aunque el ajuste del modelo (R^2^) aumente en gran medida.
+
+
+```{r plotNC, echo=TRUE, message=FALSE, warning=FALSE}
+# Visualizamos la R2
+plot(1:length(myplsda@modelDF$`R2Y(cum)`), myplsda@modelDF$`R2Y(cum)`, type = "o", pch = 16, col = "#00BFC4", lwd = 2, xlab = "Components", ylab = "", ylim = c(-0.1,0.1), main = "PLS model")
+
+# Y después la Q2
+lines(1:length(myplsda@modelDF$`Q2(cum)`), myplsda@modelDF$`Q2(cum)`, type = "o", pch = 16, col = "#F8766D", lwd = 2, ylim=c(-0.1, 0.1))
+
+# Límite en Q2
+abline(h = 0.5, col = "#F8766D", lty = 2)
+
+# lEYENDA
+legend("bottomleft", c("R2Y", "Q2"), lwd = 2, col = c("#00BFC4", "#F8766D"), bty = "n")
+```
+
+
+## Validación del modelo
+Validamos el modelo con la T2 de Hotelling. Para ello, utilizaremos los scores del modelo PLSDA.
+
+```{r T2 PLSDA, fig.width=5, fig.height=5}
+#recuperamos los Scores
+misScores = myplsda@scoreMN
+
+varT = apply(misScores, 2, var) #varianza de la componente
+miT2 = colSums(t(misScores**2) / varT) #calculamos la T2-Hotteling
+N = nrow(X_train)
+A = 2
+F95 = A*(N**2 - 1)/(N*(N - A)) * qf(0.95, A, N-A); F95
+F99 = A*(N**2 - 1)/(N*(N - A)) * qf(0.99, A, N-A); F99
+plot(1:length(miT2), miT2, type = "l", xlab = "Pacientes", ylab = "T2",
+     main = "PLS-DA: T2-Hotelling", ylim = c(0,20))
+abline(h = F95, col = "orange", lty = 2, lwd = 2)
+abline(h = F99, col = "red3", lty = 2, lwd = 2)
+
+cat("Hay", length(which(miT2 > F95)), "pacientes anómalos, cuando debería haber", nrow(X_train)*0.05)
+
+cat("\nHay", length(which(miT2 > F99)), "pacientes anómalos, cuando debería haber", nrow(X_train)*0.01)
+```
+
+Vamos a ver a qué grupos pertenecen los anómalos:
+
+```{r}
+table(train$grupfuz_todo)
+
+#Individuos por encima del 95%
+table(train[which(miT2 > F95),]$grupfuz_todo)
+
+#Individuos por encima del 99%
+table(train[which(miT2 > F99),]$grupfuz_todo)
+```
+
+
+
+## Interpretación del modelo
+Los siguientes gráficos nos servirán para interpretar el modelo PLS. El gráfico de scores t/t es muy útil para comprender la relación entre las observaciones.
+
+```{r}
+library("randomcoloR")
+set.seed(2)
+colores <- distinctColorPalette(7)   
+
+names(colores) = levels(y_train)
+
+
+#gráfico de scores comp 1 y 2
+plot(myplsda@scoreMN, col = colores[y_train], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gráfico de loadings comp 1 y 2
+plot(x = myplsda, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 2), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gráfico de scores comp 2 y 3
+plot(myplsda@scoreMN[,2:3], col = colores[y_train], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gráfico de loadings comp 2 y 3
+plot(x = myplsda, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(2, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gráfico de scores comp 1 y 3
+plot(myplsda@scoreMN[,c(1,3)], col = colores[y_train], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gráfico de loadings comp 1 y 3
+plot(x = myplsda, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gráfico de scores comp 2 y 3
+plot(myplsda@scoreMN[,3:4], col = colores[y_train], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gráfico de loadings comp 3 y 4
+plot(x = myplsda, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(3, 4), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+```
+
+
+
+```{r}
+plot(x = myplsda, typeVc = "x-score",
+     parCexN = 0.4, parCompVi = c(1, 2), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = 0.00001, parEllipsesL=FALSE)
+
+plot(x = myplsda, typeVc = "x-score",
+     parCexN = 0.4, parCompVi = c(1, 4), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = 0.00001, parEllipsesL=FALSE)
+
+
+plot(x = myplsda, typeVc = "x-score",
+     parCexN = 0.4, parCompVi = c(1, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = 0.00001, parEllipsesL=FALSE)
+
+plot(x = myplsda, typeVc = "x-score",
+     parCexN = 0.4, parCompVi = c(2, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = 0.00001, parEllipsesL=FALSE)
+```
+
+
+- Gráfico de correlación. Correlación entre las variables X e Y y las componentes PLS. 
+
+```{r}
+plot(x = myplsda, typeVc = "correlation",
+     parCexN = 0.5, parCompVi = c(1, 2), parPaletteVc = NA, 
+     parTitleL = TRUE, parCexMetricN = NA)
+
+plot(x = myplsda, typeVc = "correlation",
+     parCexN = 0.5, parCompVi = c(1, 4), parPaletteVc = NA, 
+     parTitleL = TRUE, parCexMetricN = NA)
+
+plot(x = myplsda, typeVc = "correlation",
+     parCexN = 0.5, parCompVi = c(1, 3), parPaletteVc = NA, 
+     parTitleL = TRUE, parCexMetricN = NA)
+
+plot(x = myplsda, typeVc = "correlation",
+     parCexN = 0.5, parCompVi = c(2, 3), parPaletteVc = NA, 
+     parTitleL = TRUE, parCexMetricN = NA)
+```
+
+Una visión de la importancia global tiene cada una de las variables en nuestro modelo PLS se obtiene a partir del gráfico VIP. El VIP es una medida acumulada de la influencia de cada variable X sobre la variable Y (grupo etiopatogénico).
+
+```{r vip}
+barplot(sort(myplsda@vipVn, decreasing = TRUE), main = "VIP", las = 2, cex.names=0.5) 
+
+abline(h = 1, col = 3, lty = 2) 
+abline(h = 0.8, col = 2, lty = 2) 
+
+#sacamos los genes de reparación que tienen un VIP por encima de 1.2
+names(which(myplsda@vipVn>1.2))
+```
+
+
+Respecto al VIP, tenemos `r sum(myplsda@vipVn>1)` variables que sobrepasan el valor de 1. Por ello, se pueden considerar variables importantes para la predicción. Estas son: `r names(which(myplsda@vipVn>1))`. Por lo que estas variables ayudan a predecir el precio por metro cuadrado de una casa.
+
+Además, considerando que las variables con VIP menor de 0.8 son muy poco relevantes, hemos decidido representar este valor en el gráfico. Las variables que no sobrepasan el umbral, y que por tanto no serán relevantes para la predicción son: `r names(which(mypls4@vipVn<0.8))`. Por lo que estas variables no ayudan a predecir el precio por metro cuadrado de una casa.
+
+
+Distribución variable explicada (grup_todo)
+```{r}
+
+plot(y_train, main='Distribution of grupfuz_todo in train', xlab="Grupo etiopatogénico", ylab="Counts", col="#00BFC4")
+```
+
+## Predicción del modelo
+
+```{r}
+ypred = predict(myplsda, X_test) 
+library(caret)
+library(kableExtra)
+
+#sacamos la matriz de confusión
+confusionMatrix(ypred, y_test)
+```
+
+
+
+Coeficientes del modelo
+```{r coeficientes regresion}
+coef = myplsda@coefficientMN
+coef_ord= sort(coef[,1], decreasing = TRUE)
+
+barplot(coef_ord , col=ifelse(sort(coef[,1], decreasing = TRUE) > 0, 3, 2), main='Gráfico coeficientes regresión', las=2)
+```
+
+```{r}
+#Gráfico de coeficientes regresión GRUPO 1
+coef = myplsda@coefficientMN
+coef1 = sort(coef[,1], decreasing=TRUE)
+barplot(coef1, col=ifelse(coef1 > 0, '#00BFC4', '#F8766D'), main='Regression coefficient plot Group 1', las=2, cex.names=0.4)
+
+#Gráfico de coeficientes regresión GRUPO 2
+coef2 = sort(coef[,2], decreasing=TRUE)
+barplot(coef2, col=ifelse(coef2 > 0, '#00BFC4', '#F8766D'), main='Regression coefficient plot Group 2', las=2, cex.names=0.4)
+
+#Gráfico de coeficientes regresión GRUPO 3
+coef3 = sort(coef[,3], decreasing=TRUE)
+barplot(coef3, col=ifelse(coef3 > 0, '#00BFC4', '#F8766D'), main='Regression coefficient plot Group 3', las=2, cex.names=0.4)
+
+#Gráfico de coeficientes regresión GRUPO 4
+coef4 = sort(coef[,4], decreasing=TRUE)
+barplot(coef4, col=ifelse(coef4 > 0, '#00BFC4', '#F8766D'), main='Regression coefficient plot Group 4', las=2, cex.names=0.4)
+
+#Gráfico de coeficientes regresión GRUPO 5
+coef5 = sort(coef[,5], decreasing=TRUE)
+barplot(coef5, col=ifelse(coef5 > 0, '#00BFC4', '#F8766D'), main='Regression coefficient plot Group 5', las=2, cex.names=0.4)
+
+#Gráfico de coeficientes regresión GRUPO 6
+coef6 = sort(coef[,6], decreasing=TRUE)
+barplot(coef6, col=ifelse(coef6 > 0, '#00BFC4', '#F8766D'), main='Regression coefficient plot Group 6', las=2, cex.names=0.4)
+
+#Gráfico de coeficientes regresión GRUPO 7
+coef7 = sort(coef[,7], decreasing=TRUE)
+barplot(coef7, col=ifelse(coef7 > 0, '#00BFC4', '#F8766D'), main='Regression coefficient plot Group 7', las=2, cex.names=0.4)
+```
+
+
+# PRUEBA 3: 20 regresiones logísticas
+Vamos a hacer 20 regresiones logísticas (1 por cada gen de reparación del ADN)
+
+```{r}
+# Ajuste de un modelo logístico.
+
+mod1 <- glm(XPC_rs2228001 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod1))
+p1 <- summary(mod1)$coefficients[,4]
+
+
+mod2 <- glm(XPC_rs2228000 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod2))
+p2 <- summary(mod2)$coefficients[,4]
+
+mod3 <- glm(NBN_rs1063054 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod3))
+p3 <- summary(mod3)$coefficients[,4]
+
+mod4 <- glm(NBN_rs709816 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod4))
+p4 <- summary(mod4)$coefficients[,4]
+
+mod5 <- glm(NBN_rs1805794 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod5))
+p5 <- summary(mod5)$coefficients[,4]
+
+
+#grupfuz_todo5: 0.0418 *
+mod6 <- glm(MGMT_rs10829601 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod6))
+p6 <- summary(mod6)$coefficients[,4]
+
+mod7 <- glm(ATM_rs1801516 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod7))
+p7 <- summary(mod7)$coefficients[,4]
+
+
+#grupfuz_todo5. 0.02649 *
+mod8 <- glm(ERCC5_rs17655 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod8))
+p8 <- summary(mod8)$coefficients[,4]
+
+mod9 <- glm(XRCC3_rs861539 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod9))
+p9 <- summary(mod9)$coefficients[,4]
+
+mod10 <- glm(XRCC3_rs861530 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod10))
+p10 <- summary(mod10)$coefficients[,4]
+
+mod11 <- glm(XRCC3_rs1799794 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod11))
+p11 <- summary(mod11)$coefficients[,4]
+
+#grupfuz_todo7: 0.0488 *
+mod12 <- glm(XRCC1_rs25487 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod12))
+p12 <- summary(mod12)$coefficients[,4]
+
+mod13 <- glm(XRCC1_rs25489 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod13))
+p13 <- summary(mod13)$coefficients[,4]
+
+mod14 <- glm(XRCC1_rs3213245 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod14))
+p14 <- summary(mod14)$coefficients[,4]
+
+#grupfuz_todo2:0.00829 **
+#grupfuz_todo5: 0.00621 **
+
+mod15 <- glm(ERCC2_rs13181 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod15))
+p15 <- summary(mod15)$coefficients[,4]
+
+#grupfuz_todo2: 0.0286 *
+mod16 <- glm(ERCC2_rs1799793 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod16))
+p16 <- summary(mod16)$coefficients[,4]
+
+#grupfuz_todo6: 0.0357 *
+mod17 <- glm(rs1011970_CDKN2B.AS1 ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod17))
+p17 <- summary(mod17)$coefficients[,4]
+
+mod18 <- glm(rs10757257_MTAP ~ grupfuz_todo, data = df3, family = "binomial")
+p18 <- summary(mod18)$coefficients[,4]
+print(summary(mod18))
+
+mod19 <- glm(rs2284063_PLA2G6 ~ grupfuz_todo, data = df3, family = "binomial")
+p19 <- summary(mod19)$coefficients[,4]
+print(summary(mod19))
+
+mod20<- glm(rs7023329_MTAP ~ grupfuz_todo, data = df3, family = "binomial")
+print(summary(mod20))
+p20 <- summary(mod20)$coefficients[,4]
+
+
+df_pvalue= data.frame("p1"=p1, "p2"=p2, "p3"=p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20)
+
+colnames(df_pvalue) = colnames(df3[1:20])
+df_pvalue = t(df_pvalue)
+
+library(reshape)
+p_values = data.frame(melt(df_pvalue))
+colnames(p_values)=c("genes", "grupfuz", "pvalue")
+```
+
