@@ -1,0 +1,89 @@
+---
+title: "independencia"
+output: html_document
+date: '2023-04-28'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Reading data, and change into factor type the melanoma characteristical genes. 
+
+```{r}
+braf = read.csv("BRAF.csv")
+tert = read.csv("TERT.csv")
+nras = read.csv("NRAS.csv")
+
+braf_x = braf[, -which(names(braf) == "BRAF")]
+tert_x = tert[, -which(names(tert) == "TERTprom")]
+nras_x = nras[, -which(names(nras) == "NRAS")]
+
+braf_y = as.factor(braf$BRAF)
+tert_y = as.factor(tert$TERTprom)
+nras_y = as.factor(nras$NRAS)
+```
+
+Selecting the 20 DNA repair genes variables.
+
+```{r}
+columnas = c("XPC_rs2228001","XPC_rs2228000","NBN_rs1063054","NBN_rs709816","NBN_rs1805794",         
+"MGMT_rs10829601","ATM_rs1801516","ERCC5_rs17655","XRCC3_rs861539","XRCC3_rs861530","XRCC3_rs1799794",
+"XRCC1_rs25487","XRCC1_rs25489","XRCC1_rs3213245","ERCC2_rs13181",
+"ERCC2_rs1799793","rs1011970_CDKN2B.AS1","rs10757257_MTAP",
+"rs2284063_PLA2G6","rs7023329_MTAP")
+length(columnas)
+```
+
+Applying the Fisher's test to every combination
+
+```{r}
+braf_p = c()
+for (col in names(braf)) {
+  if (col %in% columnas) {
+    data = as.factor(braf[[col]])
+    braf_p = c(braf_p, fisher.test(data, braf_y)$p.value)}
+}
+
+tert_p = c()
+for (col in names(tert)) {
+  if (col %in% columnas){
+  data = as.factor(tert[[col]])
+  tert_p = c(tert_p, fisher.test(data, tert_y)$p.value)}
+}
+
+nras_p = c()
+for (col in names(nras)) {
+  if (col %in% columnas){
+  data = nras[[col]]
+  nras_p = c(nras_p, fisher.test(data, nras_y)$p.value)}
+}
+
+p_values = data.frame(BRAF=braf_p, TERT=tert_p, NRAS=nras_p)
+rownames(p_values) = columnas
+```
+
+Formatting data into a dataframe easier to plot
+```{r}
+library(reshape)
+p_values = data.frame(melt(p_values))
+p_values$genes = columnas
+```
+
+Plotting the results using a color scale, if the p-value of the test is below 0.05 we use a grey color
+
+```{r}
+library(tibble)
+library(colorspace)
+library(ggplot2)
+ggplot(p_values, aes(x = variable, y = genes, fill = value)) + geom_tile(color = "white") + 
+  scale_fill_continuous_divergingx(palette = "RdBu", limits = c(0.05,1)) +
+  guides(fill = guide_colorbar(title = "P-value", barheight = 10)) +
+  xlab("Characteristic genes") +
+  ylab("DNA repair genes") +
+  ggtitle("DNA repair genes Fisher test") + theme_bw()
+```
+
+
+
+
