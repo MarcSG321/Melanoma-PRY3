@@ -1,0 +1,339 @@
+---
+title: "pls_da_segundointento"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(pacman)
+pacman::p_load(rio, dplyr, ropls, ggplot2, naniar, BiocManager,SummarizedExperiment,ggcorrplot,Hmisc)
+```
+
+```{r}
+braf = read.csv("BRAF.csv")
+tert = read.csv("TERT.csv")
+nras = read.csv("NRAS.csv")
+
+braf_y = as.factor(braf$BRAF)
+tert_y = as.factor(tert$TERTprom)
+nras_y = as.factor(nras$NRAS)
+
+braf_x = braf[, -which(names(braf) == "BRAF")]
+tert_x = tert[, -which(names(tert) == "TERTprom")]
+nras_x = nras[, -which(names(nras) == "NRAS")]
+
+cols = c("CSD","Nevuspre","Fotolocalización","Localización","TipoHX","Sexo")
+
+# braf_x = braf_x[, !names(braf_x) %in% cols]
+# tert_x = tert_x[, !names(tert_x) %in% cols]
+# nras_x = nras_x[, !names(nras_x) %in% cols]
+```
+
+```{r}
+vis_miss(braf)
+```
+
+```{r}
+pls_braf = opls(braf_x, braf_y, algoC = "nipals", predI = 10, crossvalI = 6)
+```
+
+```{r}
+pls_braf@modelDF$`Q2(cum)`
+
+plot(1:length(pls_braf@modelDF$`R2Y(cum)`), pls_braf@modelDF$`R2Y(cum)`, type = "o", pch = 16, col = "blue3", lwd = 2, xlab = "Components", ylab = "", ylim = c(0,0.6), main = "PLS model for BRAF")
+
+lines(1:length(pls_braf@modelDF$`Q2(cum)`), pls_braf@modelDF$`Q2(cum)`, type = "o", pch = 16, col = "red3", lwd = 2)
+
+abline(h = 0.5, col = "red3", lty = 2)
+
+legend("bottomleft", c("R2Y", "Q2"), lwd = 2, col = c("blue3", "red3"), bty = "n")
+```
+Usaremos 4 PCs
+```{r}
+pls_braf = opls(braf_x, braf_y, algoC = "nipals", predI = 4, crossvalI = 6)
+```
+VIPs
+```{r}
+vipVn <- getVipVn(pls_braf)
+barplot(sort(vipVn), horiz = T, las = 2, cex.names = 0.5)
+```
+```{r}
+plot(pls_braf, typeVc = "xy-weight")
+```
+```{r}
+plot(pls_braf, typeVc = "x-score")
+```
+```{r}
+plot(pls_braf, typeVc = "x-loading")
+```
+```{r}
+library("randomcoloR")
+
+set.seed(2)
+colores <- distinctColorPalette(2)   
+
+names(colores) = levels(braf_y)
+
+par(mfrow = c(1,2))
+#gr?fico de scores comp 1 y 2
+plot(pls_braf@scoreMN, col = colores[braf_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 1 y 2
+plot(x = pls_braf, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 2), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gr?fico de scores comp 2 y 3
+plot(pls_braf@scoreMN[,2:3], col = colores[braf_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 2 y 3
+plot(x = pls_braf, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(2, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gr?fico de scores comp 1 y 3
+plot(pls_braf@scoreMN[,c(1,3)], col = colores[braf_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 1 y 3
+plot(x = pls_braf, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gr?fico de scores comp 2 y 3
+plot(pls_braf@scoreMN[,3:4], col = colores[braf_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 3 y 4
+plot(x = pls_braf, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(3, 4), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+```
+
+
+```{r}
+res3 <- rcorr(as.matrix(braf))
+
+last_col <- data.frame(braf=c(res3$r[,6]))
+ggcorrplot(last_col, show.diag=FALSE, type="lower", lab=TRUE, lab_size=2)
+```
+
+## TERT
+
+```{r}
+vis_miss(tert)
+```
+
+```{r}
+pls_tert = opls(tert_x, tert_y, algoC = "nipals", predI = 10, crossvalI = 6)
+```
+
+
+
+```{r}
+pls_tert@modelDF$`Q2(cum)`
+
+plot(1:length(pls_tert@modelDF$`R2Y(cum)`), pls_tert@modelDF$`R2Y(cum)`, type = "o", pch = 16, col = "blue3", lwd = 2, xlab = "Components", ylab = "", ylim = c(-0.4,0.7), main = "PLS model")
+
+lines(1:length(pls_tert@modelDF$`Q2(cum)`), pls_tert@modelDF$`Q2(cum)`, type = "o", pch = 16, col = "red3", lwd = 2)
+
+abline(h = 0.5, col = "red3", lty = 2)
+
+legend("bottomleft", c("R2Y", "Q2"), lwd = 2, col = c("blue3", "red3"), bty = "n")
+```
+```{r}
+pls_tert = opls(tert_x, tert_y, algoC = "nipals", predI = 4, crossvalI = 6)
+```
+```{r}
+vipVn <- getVipVn(pls_tert)
+barplot(sort(vipVn), horiz = T, las = 2, cex.names = 0.4)
+```
+
+```{r}
+plot(pls_tert, typeVc = "x-loading")
+```
+```{r}
+plot(pls_tert, typeVc = "xy-weight")
+```
+
+```{r}
+plot(pls_tert, typeVc = "x-score")
+```
+```{r}
+library("randomcoloR")
+
+set.seed(2)
+colores <- distinctColorPalette(2)   
+
+names(colores) = levels(tert_y)
+
+par(mfrow = c(1,2))
+#gr?fico de scores comp 1 y 2
+plot(pls_tert@scoreMN, col = colores[tert_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 1 y 2
+plot(x = pls_tert, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 2), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gr?fico de scores comp 2 y 3
+plot(pls_tert@scoreMN[,2:3], col = colores[tert_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 2 y 3
+plot(x = pls_tert, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(2, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gr?fico de scores comp 1 y 3
+plot(pls_tert@scoreMN[,c(1,3)], col = colores[tert_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 1 y 3
+plot(x = pls_tert, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gr?fico de scores comp 2 y 3
+plot(pls_tert@scoreMN[,3:4], col = colores[tert_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 3 y 4
+plot(x = pls_tert, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(3, 4), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+```
+```{r}
+res3 <- rcorr(as.matrix(tert))
+
+last_col <- data.frame(tert=c(res3$r[,6]))
+ggcorrplot(last_col, show.diag=FALSE, type="lower", lab=TRUE, lab_size=2)
+```
+Hacer chi2 MTAP 
+
+```{r}
+chisq.test(as.factor(tert$rs10757257_MTAP), tert_y, simulate.p.value = T)
+fisher.test(as.factor(tert$rs10757257_MTAP), tert_y)
+```
+
+
+
+## NRAS
+
+```{r}
+vis_miss(nras)
+```
+```{r}
+pls_nras = opls(nras_x, nras_y, algoC = "nipals", predI = 10, crossvalI = 6)
+```
+
+```{r}
+pls_nras = opls(nras_x, nras_y, algoC = "nipals", predI = 10, crossvalI = 6)
+```
+```{r}
+pls_nras@modelDF$`Q2(cum)`
+
+plot(1:length(pls_nras@modelDF$`R2Y(cum)`), pls_nras@modelDF$`R2Y(cum)`, type = "o", pch = 16, col = "blue3", lwd = 2, xlab = "Components", ylab = "", ylim = c(-0.4,0.6), main = "PLS model")
+
+lines(1:length(pls_nras@modelDF$`Q2(cum)`), pls_nras@modelDF$`Q2(cum)`, type = "o", pch = 16, col = "red3", lwd = 2)
+
+abline(h = 0.5, col = "red3", lty = 2)
+
+legend("bottomleft", c("R2Y", "Q2"), lwd = 2, col = c("blue3", "red3"), bty = "n")
+```
+```{r}
+pls_nras = opls(nras_x, nras_y, algoC = "nipals", predI = 4, crossvalI = 6)
+```
+```{r}
+vipVn <- getVipVn(pls_nras)
+barplot(sort(vipVn), horiz = T, las = 2, cex.names = 0.4)
+```
+```{r}
+plot(pls_nras, typeVc = "xy-weight")
+```
+
+```{r}
+plot(pls_nras, typeVc = "x-loading")
+```
+
+```{r}
+plot(pls_nras, typeVc = "x-score")
+```
+```{r}
+library("randomcoloR")
+
+set.seed(2)
+colores <- distinctColorPalette(2)   
+
+names(colores) = levels(nras_y)
+
+par(mfrow = c(1,2))
+#gr?fico de scores comp 1 y 2
+plot(pls_nras@scoreMN, col = colores[nras_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 1 y 2
+plot(x = pls_nras, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 2), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gr?fico de scores comp 2 y 3
+plot(pls_nras@scoreMN[,2:3], col = colores[nras_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 2 y 3
+plot(x = pls_nras, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(2, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gr?fico de scores comp 1 y 3
+plot(pls_nras@scoreMN[,c(1,3)], col = colores[nras_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 1 y 3
+plot(x = pls_nras, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 3), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+
+#gr?fico de scores comp 2 y 3
+plot(pls_nras@scoreMN[,3:4], col = colores[nras_y], pch = 20, asp = 1,
+     main = "PLS-DA: Score plot")
+legend("topright", names(colores), fill = colores, bty = "n", ncol = 3)
+
+#gr?fico de loadings comp 3 y 4
+plot(x = pls_nras, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(3, 4), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+```
+```{r}
+res3 <- rcorr(as.matrix(nras))
+
+last_col <- data.frame(nras=c(res3$r[,6]))
+ggcorrplot(last_col, show.diag=FALSE, type="lower", lab=TRUE, lab_size=2)
+```
+
+
+
+
+
+
