@@ -1,0 +1,269 @@
+---
+title: "Obj1_Models"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(pacman)
+pacman::p_load(ggplot2,dplyr,ropls,naniar,randomForest,glmnet,caret,randomForestExplainer)
+```
+
+```{r}
+braf = read.csv("BRAF.csv",stringsAsFactors = T)
+tert = read.csv("TERT.csv",stringsAsFactors = T)
+nras = read.csv("NRAS.csv",stringsAsFactors = T)
+
+braf_y = as.factor(braf$BRAF)
+tert_y = as.factor(tert$TERTprom)
+nras_y = as.factor(nras$NRAS)
+braf$BRAF = braf_y
+tert$TERTprom = tert_y
+nras$NRAS = nras_y
+
+braf_x = braf[, -which(names(braf) == "BRAF")]
+tert_x = tert[, -which(names(tert) == "TERTprom")]
+nras_x = nras[, -which(names(nras) == "NRAS")]
+```
+
+
+# MODELOS PARA BRAF
+
+```{r}
+columnas = c("XPC_rs2228001","XPC_rs2228000","NBN_rs1063054","NBN_rs709816","NBN_rs1805794",         
+"MGMT_rs10829601","ATM_rs1801516","ERCC5_rs17655","XRCC3_rs861539","XRCC3_rs861530","XRCC3_rs1799794",
+"XRCC1_rs25487","XRCC1_rs25489","XRCC1_rs3213245","ERCC2_rs13181",
+"ERCC2_rs1799793","rs1011970_CDKN2B.AS1","rs10757257_MTAP",
+"rs2284063_PLA2G6","rs7023329_MTAP")
+
+braf_p = c()
+for (col in names(braf)) {
+  if (col %in% columnas){
+    dat = data.frame(braf$BRAF, braf[col])
+    res = glm(braf.BRAF ~ ., data = dat, family = "binomial")
+    p_val = summary(res)$coefficients[,4][col]
+    braf_p = c(braf_p, p_val)
+  }
+}
+
+tert_p = c()
+for (col in names(tert)) {
+  if (col %in% columnas){
+    dat = data.frame(tert$TERTprom, tert[col])
+    res = glm(tert.TERTprom ~ ., data = dat, family = "binomial")
+    p_val = summary(res)$coefficients[,4][col]
+    tert_p = c(tert_p, p_val)
+  }
+}
+
+nras_p = c()
+for (col in names(nras)) {
+  if (col %in% columnas){
+    dat = data.frame(nras$NRAS, nras[col])
+    res = glm(nras.NRAS ~ ., data = dat, family = "binomial")
+    p_val = summary(res)$coefficients[,4][col]
+    nras_p = c(nras_p, p_val)
+  }
+}
+
+p_values = data.frame(BRAF=braf_p, TERT=tert_p, NRAS=nras_p)
+rownames(p_values) = columnas
+```
+
+```{r}
+library(reshape)
+p_values = data.frame(melt(p_values))
+p_values$genes = columnas
+```
+```{r}
+library(tibble)
+library(colorspace)
+library(ggplot2)
+ggplot(p_values, aes(x = variable, y = genes, fill = value)) + geom_tile(color = "white") + 
+  scale_fill_continuous_divergingx(palette = "RdBu", limits = c(0.05,1)) +
+  guides(fill = guide_colorbar(title = "P-value", barheight = 10)) +
+  xlab("Characteristic genes") +
+  ylab("DNA repair genes") +
+  ggtitle("Logistic regression p-values") + theme_bw()
+```
+# Full logistic models with Lasso
+Considerando todo numérico
+
+```{r}
+vis_miss(braf_x)
+```
+
+Excluding CSD, Categorize Longitud telomeros and Edad, imputing NA by modal.
+
+```{r}
+braf_x2 = braf_x
+braf_x2$Longitud.telómeros = ifelse(braf$Longitud.telómeros < 1.17, 0,1)
+braf_x2$Edad <- cut(braf_x2$Edad, breaks = c(0,30,65,Inf), labels = c(1,2,3))
+
+braf_x3 = braf_x2
+braf_x3 = braf_x3[-which(names(braf_x3) == "CSD")]
+braf_x3 = data.frame(lapply(braf_x3, as.factor))
+
+# NA por "desc"
+for (col in names(braf_x2)) {
+  braf_x2[col] <- replace(braf_x2[col], is.na(braf_x2[col]), "desc")
+  }
+braf_x2 = data.frame(lapply(braf_x2, as.factor))
+
+# Imputación por la moda
+for (col in names(braf_x3)) {
+  vec_miss = braf_x2[col]
+  val <- unique(vec_miss[!is.na(vec_miss)]) 
+  my_mode <- val[which.max(tabulate(match(vec_miss, val)))]
+  vec_imp <- vec_miss
+  vec_imp[is.na(vec_imp)] <- my_mode
+  braf_x3[col] = vec_imp
+}
+vis_miss(braf_x2)
+```
+
+Modelos regresión logística:
+
+```{r}
+fit = glmnet(braf_x3, braf_y, alpha = 1, family = "binomial")
+coef(fit)
+```
+
+```{r}
+braf2 = braf_x2
+braf2$BRAF = braf$BRAF
+fit = glm(BRAF ~ ., data = braf2, family = "binomial")
+summary(fit)
+```
+
+```{r}
+fit = glm(braf_x2, braf_y, family = "binomial")
+```
+
+## Random Forest
+# Probamos con clase "desc"
+
+```{r}
+braf2 = braf_x2
+braf2$BRAF = as.factor(braf$BRAF)
+rf = randomForest(BRAF ~ ., data = braf2)
+rf
+
+importancias = importance(rf)
+imp = data.frame(names(importancias[,1]), importancias[,1])
+colnames(imp) = c("var","importance")
+
+ggplot(data = imp, aes(x = reorder(var, importance), y = importance)) + 
+  geom_bar(stat = "identity") + coord_flip() 
+
+importance_frame <- measure_importance(rf)
+plot_multi_way_importance(importance_frame, size_measure = "no_of_nodes")
+```
+# Probando ahora con la imputacion por moda
+
+```{r}
+braf3 = braf_x3
+braf3$BRAF = as.factor(braf$BRAF)
+rf_moda = randomForest(BRAF ~ ., data = braf3)
+rf_moda
+
+importancias_moda = importance(rf_moda)
+imp_moda = data.frame(names(importancias_moda[,1]), importancias_moda[,1])
+colnames(imp_moda) = c("var","importance")
+
+ggplot(data = imp_moda, aes(x = reorder(var, importance), y = importance)) + 
+  geom_bar(stat = "identity") + coord_flip()
+
+importance_frame <- measure_importance(rf_under)
+plot_multi_way_importance(importance_frame, size_measure = "no_of_nodes")
+```
+
+# Probamos con "desc" + Undersampling
+
+```{r}
+braf_under = downSample(braf2, braf2$BRAF)
+braf_under = braf_under[,-which(colnames(braf_under) == "Class")]
+
+rf_under = randomForest(BRAF ~ ., data = braf_under)
+rf_under
+
+importancias_under = importance(rf_under)
+imp_under = data.frame(names(importancias_under[,1]), importancias_under[,1])
+colnames(imp_under) = c("var","importance")
+
+ggplot(data = imp_under, aes(x = reorder(var, importance), y = importance)) + 
+  geom_bar(stat = "identity") + coord_flip()
+```
+
+# GEN TERTprom
+
+```{r}
+tert_x2 = tert_x
+tert_x2$Longitud.telómeros = ifelse(tert_x2$Longitud.telómeros < 1.17, 0,1)
+tert_x2$Edad <- cut(tert_x2$Edad, breaks = c(0,30,65,Inf), labels = c(1,2,3))
+
+tert_x3 = tert_x2
+tert_x3 = tert_x3[-which(names(tert_x3) == "CSD")]
+tert_x3 = data.frame(lapply(tert_x3, as.factor))
+
+# "desc"
+for (col in names(tert_x2)) {
+  tert_x2[col] <- replace(tert_x2[col], is.na(tert_x2[col]), "desc")
+  }
+tert_x2 = data.frame(lapply(tert_x2, as.factor))
+```
+
+```{r}
+tert2 = tert_x2
+tert2 = lapply(tert2, as.numeric)
+
+tert2$TERTprom = tert$TERTprom
+tert2$TERTprom = as.factor(tert$TERTprom)
+
+rf_moda = randomForest(TERTprom ~ ., data = tert2)
+rf_moda
+
+importancias_moda = importance(rf_moda)
+imp_moda = data.frame(names(importancias_moda[,1]), importancias_moda[,1])
+colnames(imp_moda) = c("var","importance")
+
+ggplot(data = imp_moda, aes(x = reorder(var, importance), y = importance)) + 
+  geom_bar(stat = "identity") + coord_flip()
+
+importance_frame <- measure_importance(rf_moda)
+plot_multi_way_importance(importance_frame, size_measure = "no_of_nodes")
+```
+
+# GEN NRAS
+
+```{r}
+nras_x2 = nras_x
+nras_x2$Longitud.telómeros = ifelse(nras_x2$Longitud.telómeros < 1.17, 0,1)
+nras_x2$Edad <- cut(nras_x2$Edad, breaks = c(0,30,65,Inf), labels = c(1,2,3))
+
+# "desc"
+for (col in names(nras_x2)) {
+  nras_x2[col] <- replace(nras_x2[col], is.na(nras_x2[col]), "desc")
+  }
+nras_x2 = data.frame(lapply(nras_x2, as.factor))
+```
+
+```{r}
+nras2 = nras_x2
+nras2$NRAS = as.factor(nras$NRAS)
+rf_moda = randomForest(NRAS ~ ., data = nras2)
+rf_moda
+
+importancias_moda = importance(rf_moda)
+imp_moda = data.frame(names(importancias_moda[,1]), importancias_moda[,1])
+colnames(imp_moda) = c("var","importance")
+
+ggplot(data = imp_moda, aes(x = reorder(var, importance), y = importance)) + 
+  geom_bar(stat = "identity") + coord_flip()
+
+importance_frame <- measure_importance(rf_moda)
+plot_multi_way_importance(importance_frame, size_measure = "no_of_nodes")
+```
